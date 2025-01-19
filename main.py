@@ -97,3 +97,109 @@ if __name__ == "__main__":
     add_post("user1", "Це моя друга публікація.")
 
     print(view_posts("user1"))
+
+#task2
+
+import redis
+from bcrypt import hashpw, gensalt, checkpw
+
+db = redis.StrictRedis(host='localhost', port=6379, decode_responses=True)
+
+def hash_password(password):
+    return hashpw(password.encode(), gensalt()).decode()
+
+def verify_password(password, hashed):
+    return checkpw(password.encode(), hashed.encode())
+
+def add_user(username, password):
+    if db.hget(f'user:{username}', 'username'):
+        return False
+    db.hset(f'user:{username}', mapping={
+        'username': username,
+        'password': hash_password(password)
+    })
+    return True
+
+def login(username, password):
+    user_data = db.hgetall(f'user:{username}')
+    if user_data and verify_password(password, user_data['password']):
+        return True
+    return False
+
+def add_exhibit(name, description, type):
+    exhibit_id = db.incr('exhibit_id')
+    db.hset(f'exhibit:{exhibit_id}', mapping={
+        'name': name,
+        'description': description,
+        'type': type
+    })
+    return exhibit_id
+
+def delete_exhibit(exhibit_id):
+    if not db.exists(f'exhibit:{exhibit_id}'):
+        return False
+    db.delete(f'exhibit:{exhibit_id}')
+    return True
+
+def edit_exhibit(exhibit_id, name=None, description=None, type=None):
+    if not db.exists(f'exhibit:{exhibit_id}'):
+        return False
+    if name:
+        db.hset(f'exhibit:{exhibit_id}', 'name', name)
+    if description:
+        db.hset(f'exhibit:{exhibit_id}', 'description', description)
+    if type:
+        db.hset(f'exhibit:{exhibit_id}', 'type', type)
+    return True
+
+def view_exhibit(exhibit_id):
+    return db.hgetall(f'exhibit:{exhibit_id}')
+
+def view_all_exhibits():
+    exhibit_ids = db.keys('exhibit:*')
+    return [db.hgetall(exhibit_id) for exhibit_id in exhibit_ids]
+
+def add_person_to_exhibit(exhibit_id, person_name, relation):
+    db.sadd(f'exhibit_people:{exhibit_id}', f"{person_name}:{relation}")
+
+def view_exhibit_people(exhibit_id):
+    return db.smembers(f'exhibit_people:{exhibit_id}')
+
+def view_person_exhibits(person_name):
+    exhibit_ids = db.keys('exhibit_people:*')
+    person_exhibits = []
+    for exhibit_id in exhibit_ids:
+        if any(person_name in member for member in db.smembers(exhibit_id)):
+            exhibit_id = exhibit_id.split(':')[1]
+            person_exhibits.append(db.hgetall(f'exhibit:{exhibit_id}'))
+    return person_exhibits
+
+def view_exhibits_by_type(type):
+    exhibit_ids = db.keys('exhibit:*')
+    return [db.hgetall(exhibit_id) for exhibit_id in exhibit_ids if db.hget(exhibit_id, 'type') == type]
+
+if __name__ == "__main__":
+    add_user("user1", "password123")
+    add_user("user2", "password456")
+
+    login("user1", "password123")
+
+    exhibit1_id = add_exhibit("Кобзар", "Збірка віршів Т.Г. Шевченка", "книга")
+    exhibit2_id = add_exhibit("Перо Шевченка", "Перо, яким писав Т.Г. Шевченко", "артефакт")
+
+    view_exhibit(exhibit1_id)
+
+    edit_exhibit(exhibit1_id, description="Збірка поетичних творів Т.Г. Шевченка")
+    view_exhibit(exhibit1_id)
+
+    add_person_to_exhibit(exhibit1_id, "Тарас Шевченко", "автор")
+    view_exhibit_people(exhibit1_id)
+
+    view_all_exhibits()
+
+    view_exhibits_by_type("книга")
+
+    delete_exhibit(exhibit2_id)
+    view_all_exhibits()
+
+    view_person_exhibits("Тарас Шевченко")
